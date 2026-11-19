@@ -1,4 +1,4 @@
-namespace wt_lab6_6minimalapi_ageyavich.Models;
+namespace wt_lab7_7postgres_efcore_ageyavich.Models;
 
 public class Product
 {
@@ -7,4 +7,5 @@ public class Product
     public string Category { get; set; } = string.Empty;
     public decimal Price { get; set; }
     public bool IsAvailable { get; set; } = true;
+    public DateTime CreatedAt { get; set; }
 }

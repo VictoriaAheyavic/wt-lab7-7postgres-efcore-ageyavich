@@ -1,21 +1,47 @@
-using wt_lab6_6minimalapi_ageyavich.Data;
-using wt_lab6_6minimalapi_ageyavich.Models;
+using Microsoft.EntityFrameworkCore;
+using wt_lab7_7postgres_efcore_ageyavich.Data;
+using wt_lab7_7postgres_efcore_ageyavich.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Добавляем поддержку OpenAPI
 builder.Services.AddOpenApi(); 
+
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+var databaseUrl = builder.Configuration["DATABASE_URL"];
+
+if (!string.IsNullOrWhiteSpace(databaseUrl))
+{
+    var uri = new Uri(databaseUrl);
+    var userInfo = uri.UserInfo.Split(':', 2);
+    connectionString = $"Host={uri.Host};" +
+                       $"Port={uri.Port};" +
+                       $"Database={uri.AbsolutePath.TrimStart('/')};" +
+                       $"Username={Uri.UnescapeDataString(userInfo[0])};" +
+                       $"Password={Uri.UnescapeDataString(userInfo[1])};" +
+                       "SSL Mode=Disable"; // Для внутреннего подключения в Render
+}
+
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(connectionString));
 
 var app = builder.Build();
 
-// Включаем генератор документации в режиме разработки
+
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.Migrate();
+}
+
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
 
 // GET /
-app.MapGet("/", () => "Minimal API работает!");
+app.MapGet("/", () => "Minimal API работает с PostgreSQL!");
 
 // GET /api/info
 app.MapGet("/api/info", () => 
@@ -23,80 +49,97 @@ app.MapGet("/api/info", () =>
     return new
     {
         Application = "Web Technologies",
-        Technology = "ASP.NET Core Minimal API",
+        Technology = "ASP.NET Core Minimal API + EF Core + PostgreSQL",
         Version = "1.0"
     };
 });
 
-// 1. GET /api/products (получить список + фильтрация)
-app.MapGet("/api/products", (string? search) => 
+
+// 1. GET /api/products (получить все)
+app.MapGet("/api/products", async (AppDbContext db) => 
 {
-    var products = ProductStore.Products.AsEnumerable();
-    
-    // Если передан query-параметр search, фильтруем
-    if (!string.IsNullOrWhiteSpace(search))
-    {
-        products = products.Where(x => x.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
-    }
-    
+    var products = await db.Products.ToListAsync();
     return Results.Ok(products);
 });
 
-// 2. GET /api/products/{id} (получить один объект)
-app.MapGet("/api/products/{id}", (int id) => 
+// 2. GET /api/products/{id} (получить один)
+app.MapGet("/api/products/{id}", async (int id, AppDbContext db) => 
 {
-    var product = ProductStore.Products.FirstOrDefault(x => x.Id == id);
-    
-    if (product == null) 
-        return Results.NotFound(); // 404
-        
-    return Results.Ok(product);    // 200
+    var product = await db.Products.FirstOrDefaultAsync(x => x.Id == id);
+    if (product == null) return Results.NotFound(); // 404
+    return Results.Ok(product); // 200
 });
 
-// POST /api/products
-app.MapPost("/api/products", (Product product) => 
+// 3. POST /api/products (создать)
+app.MapPost("/api/products", async (Product product, AppDbContext db) => 
 {
-    // Автоматическая генерация ID
-    var newId = ProductStore.Products.Count == 0 
-        ? 1 
-        : ProductStore.Products.Max(x => x.Id) + 1;
-        
-    product.Id = newId;
-    ProductStore.Products.Add(product);
-
-    // Возвращаем 201 Created и ссылку на созданный ресурс
-    return Results.Created($"/api/products/{product.Id}", product);
+    db.Products.Add(product);
+    await db.SaveChangesAsync(); // Сохраняем в базу
+    return Results.Created($"/api/products/{product.Id}", product); // 201
 });
 
-// PUT /api/products/{id} (обновление)
-app.MapPut("/api/products/{id}", (int id, Product updatedProduct) => 
+// 4. PUT /api/products/{id} (обновить)
+app.MapPut("/api/products/{id}", async (int id, Product updatedProduct, AppDbContext db) => 
 {
-    var product = ProductStore.Products.FirstOrDefault(x => x.Id == id);
-    
-    if (product == null) 
-        return Results.NotFound();
+    var product = await db.Products.FirstOrDefaultAsync(x => x.Id == id);
+    if (product == null) return Results.NotFound();
 
-    // Обновляем поля
+
     product.Name = updatedProduct.Name;
     product.Category = updatedProduct.Category;
     product.Price = updatedProduct.Price;
     product.IsAvailable = updatedProduct.IsAvailable;
 
-    return Results.Ok(product);
+    await db.SaveChangesAsync();
+    return Results.Ok(product); // 200
 });
 
-// DELETE /api/products/{id} (удаление)
-app.MapDelete("/api/products/{id}", (int id) => 
+// 5. DELETE /api/products/{id} (удалить)
+app.MapDelete("/api/products/{id}", async (int id, AppDbContext db) => 
 {
-    var product = ProductStore.Products.FirstOrDefault(x => x.Id == id);
-    
-    if (product == null) 
-        return Results.NotFound();
+    var product = await db.Products.FirstOrDefaultAsync(x => x.Id == id);
+    if (product == null) return Results.NotFound();
 
-    ProductStore.Products.Remove(product);
-    
-    // 204 No Content (успешно удалено, тело ответа не нужно)
-    return Results.NoContent(); 
+    db.Products.Remove(product);
+    await db.SaveChangesAsync();
+    return Results.NoContent(); // 204
+});
+
+
+// LINQ 1: Поиск по названию (Шаг 15)
+app.MapGet("/api/products/search", async (string? search, AppDbContext db) => 
+{
+    var query = db.Products.AsQueryable();
+    if (!string.IsNullOrWhiteSpace(search))
+    {
+        query = query.Where(x => x.Name.ToLower().Contains(search.ToLower()));
+    }
+    var products = await query.ToListAsync();
+    return Results.Ok(products);
+});
+
+// LINQ 2: Фильтрация
+app.MapGet("/api/products/expensive", async (AppDbContext db) => 
+{
+    var products = await db.Products.Where(x => x.Price > 100).ToListAsync();
+    return Results.Ok(products);
+});
+
+// LINQ 3: Сортировка по цене (по возрастанию)
+app.MapGet("/api/products/by-price", async (AppDbContext db) => 
+{
+    var products = await db.Products.OrderBy(x => x.Price).ToListAsync();
+    return Results.Ok(products);
+});
+
+// LINQ 4: Выборка с условием + сортировка (доступные по алфавиту)
+app.MapGet("/api/products/available", async (AppDbContext db) => 
+{
+    var products = await db.Products
+        .Where(x => x.IsAvailable)
+        .OrderBy(x => x.Name)
+        .ToListAsync();
+    return Results.Ok(products);
 });
 
 var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
