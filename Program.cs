@@ -12,9 +12,27 @@ var databaseUrl = builder.Configuration["DATABASE_URL"];
 
 if (!string.IsNullOrWhiteSpace(databaseUrl))
 {
-    var connBuilder = new NpgsqlConnectionStringBuilder(databaseUrl);
-    connBuilder.SslMode = SslMode.Disable;
-    connectionString = connBuilder.ConnectionString;
+    databaseUrl = databaseUrl.Trim().Trim('"', '\''); 
+    
+    try
+    {
+        var uri = new Uri(databaseUrl);
+        var userInfo = uri.UserInfo.Split(':', 2);
+        var port = uri.Port > 0 ? uri.Port : 5432; // Защита от ошибки с портом -1
+
+        connectionString = $"Host={uri.Host};" +
+                           $"Port={port};" +
+                           $"Database={uri.AbsolutePath.TrimStart('/')};" +
+                           $"Username={Uri.UnescapeDataString(userInfo[0])};" +
+                           $"Password={Uri.UnescapeDataString(userInfo[1])};" +
+                           "SSL Mode=Disable";
+    }
+    catch (Exception ex)
+    {
+        // Если URL кривой, мы увидим это в логах Render и приложение не упадёт молча
+        Console.WriteLine($"[ОШИБКА РЕНДЕРА] Неверный формат DATABASE_URL. Значение: '{databaseUrl}'");
+        Console.WriteLine($"[ОШИБКА РЕНДЕРА] Детали: {ex.Message}");
+    }
 }
 
 
