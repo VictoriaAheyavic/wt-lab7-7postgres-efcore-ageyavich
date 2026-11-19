@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using wt_lab7_7postgres_efcore_ageyavich.Data;
 using wt_lab7_7postgres_efcore_ageyavich.Models;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,14 +12,9 @@ var databaseUrl = builder.Configuration["DATABASE_URL"];
 
 if (!string.IsNullOrWhiteSpace(databaseUrl))
 {
-    var uri = new Uri(databaseUrl);
-    var userInfo = uri.UserInfo.Split(':', 2);
-    connectionString = $"Host={uri.Host};" +
-                       $"Port={uri.Port};" +
-                       $"Database={uri.AbsolutePath.TrimStart('/')};" +
-                       $"Username={Uri.UnescapeDataString(userInfo[0])};" +
-                       $"Password={Uri.UnescapeDataString(userInfo[1])};" +
-                       "SSL Mode=Disable"; // Для внутреннего подключения в Render
+    var connBuilder = new NpgsqlConnectionStringBuilder(databaseUrl);
+    connBuilder.SslMode = SslMode.Disable;
+    connectionString = connBuilder.ConnectionString;
 }
 
 
